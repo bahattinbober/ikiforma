@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/IkiForma.Api/IkiForma.Api.csproj" />
+    <Project Path="src/IkiForma.Data/IkiForma.Data.csproj" />
+    <Project Path="src/IkiForma.Worker/IkiForma.Worker.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,6 @@
+@IkiForma.Api_HostAddress = http://localhost:5047
+
+GET {{IkiForma.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

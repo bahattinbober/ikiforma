@@ -1,0 +1,30 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# EF Core
+*.db
+*.db-shm
+*.db-wal
+
+# Secrets (never commit real connection strings / API keys)
+appsettings.*.local.json
+**/secrets.json
+
+# Node / Next.js (frontend eklendiğinde)
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# Docker
+docker-compose.override.yml
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
