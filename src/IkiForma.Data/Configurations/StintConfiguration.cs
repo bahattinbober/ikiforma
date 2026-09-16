@@ -10,6 +10,24 @@ public class StintConfiguration : IEntityTypeConfiguration<Stint>
     {
         builder.ToTable("stint");
 
+        builder.Property(x => x.SourceStatementId).HasMaxLength(64).IsRequired();
+        builder.HasIndex(x => x.SourceStatementId).IsUnique();
+
+        builder.Property(x => x.StartDatePrecision)
+            .HasConversion<string>()
+            .HasMaxLength(20)
+            .HasDefaultValue(DatePrecision.Unknown);
+
+        builder.Property(x => x.EndDatePrecision)
+            .HasConversion<string>()
+            .HasMaxLength(20)
+            .HasDefaultValue(DatePrecision.Unknown);
+
+        builder.Property(x => x.StintType)
+            .HasConversion<string>()
+            .HasMaxLength(20)
+            .HasDefaultValue(StintType.Unknown);
+
         // Kesişim sorgusu team_id ile eşitlik filtresi yapar (WHERE team_id = @A),
         // bu yüzden team_id lider kolon: index-only scan ile player_id listesi doğrudan okunur.
         builder.HasIndex(x => new { x.TeamId, x.PlayerId });
