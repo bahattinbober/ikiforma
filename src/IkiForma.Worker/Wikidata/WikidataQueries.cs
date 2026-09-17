@@ -4,47 +4,38 @@ internal static class WikidataQueries
 {
     public const string SuperLigQid = "Q485568";
 
-    /// <summary>
-    /// "association football club" — P118/P1923'ün takım DIŞINDA (ör. oyuncu) sonuç
-    /// döndürmesini engellemek için zorunlu.
-    /// </summary>
-    private const string FootballClubQid = "Q476028";
+    /// <summary>"association football player" — P54 kayıtlarını futbolcu olmayan üyelerden (çok branşlı kulüplerde yönetici/başka spor sporcusu) ayıklamak için.</summary>
+    private const string FootballerQid = "Q937857";
 
     /// <summary>
-    /// Süper Lig'deki takımlar. wdt:P118 sadece takımın GÜNCEL ligini verir; sezon bazlı
-    /// P3450+P1923 yaklaşımı geçmiş sezonları da kapsar. İkisinin UNION'ı en eksiksiz
-    /// tarihsel listeyi verir.
+    /// Verilen takım QID'lerini (bkz. src/IkiForma.Worker/Data/superlig-teams.json) Wikidata'dan
+    /// güncel etiket ve ülke bilgisiyle çeker.
     ///
-    /// ÖNEMLİ: P118 Wikidata'da "league in which TEAM OR PLAYER plays" olarak tanımlı —
-    /// yani doğrudan futbolcu item'larına da uygulanır. wdt:P31/wdt:P279* ile "futbol
-    /// kulübü" (Q476028) filtresi olmadan bu sorgu takım yerine oyuncu/maç item'ları da
-    /// döndürür (ilk çalıştırmada fark edildi: 103 "takım"dan sadece ~31'i gerçekti).
+    /// Dinamik keşif (wdt:P118 güncel lig + wdt:P3450/P1923 sezon union'ı) terk edildi: Wikidata'da
+    /// bazı tarihi Süper Lig kulüplerinin sezon verisi eksik/tutarsız olduğu için dinamik sorgu
+    /// tr.wikipedia'nın "tüm zamanlar" listesindeki 79 kulübün önemli bir kısmını kaçırıyordu.
+    /// Statik liste elle doğrulanıp (P54 oyuncu sayısı ile) her QID'nin gerçekten o kulübe ait
+    /// olduğu teyit edildikten sonra oluşturuldu. "Futbol kulübü" tip filtresi kasıtlı olarak
+    /// kaldırıldı: Karşıyaka gibi çok branşlı kulüpler Wikidata'da "sports club" olarak
+    /// modellenebiliyor ve bu filtre onları düşürüyordu — liste zaten elle doğrulandığı için
+    /// filtreye gerek yok (bkz. WikidataSyncService'teki eksik-QID uyarısı).
     /// </summary>
-    public static string Teams => $$"""
+    public static string TeamsByQids(IEnumerable<string> qids) => $$"""
         SELECT DISTINCT ?team ?teamLabel ?countryLabel WHERE {
-          {
-            ?team wdt:P118 wd:{{SuperLigQid}};
-                  wdt:P31/wdt:P279* wd:{{FootballClubQid}}.
-          }
-          UNION
-          {
-            ?season wdt:P3450 wd:{{SuperLigQid}};
-                    wdt:P1923 ?team.
-            ?team wdt:P31/wdt:P279* wd:{{FootballClubQid}}.
-          }
+          VALUES ?team { {{string.Join(" ", qids.Select(q => $"wd:{q}"))}} }
           OPTIONAL { ?team wdt:P17 ?country. }
           SERVICE wikibase:label { bd:serviceParam wikibase:language "tr,en". }
         }
-        LIMIT 1000
         """;
 
-    /// <summary>Verilen takımda P54 (member of sports team) ile geçen oyuncular ve stint nitelikleri.</summary>
+    /// <summary>Verilen takımda P54 (member of sports team) ile geçen futbolcular ve stint nitelikleri.</summary>
     public static string Stints(string teamQid) => $$"""
         SELECT ?player ?playerLabel ?membership
                ?start ?startPrecision ?end ?endPrecision
                ?transferType ?appearances ?goals
         WHERE {
           ?player wdt:P31 wd:Q5;
+                  wdt:P106 wd:{{FootballerQid}};
                   p:P54 ?membership.
           ?membership ps:P54 wd:{{teamQid}}.
 

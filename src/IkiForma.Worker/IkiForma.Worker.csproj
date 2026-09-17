@@ -15,4 +15,10 @@
   <ItemGroup>
     <ProjectReference Include="..\IkiForma.Data\IkiForma.Data.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Content Update="Data\superlig-teams.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
 </Project>

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using IkiForma.Data;
 using IkiForma.Data.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -6,7 +7,8 @@ namespace IkiForma.Worker.Wikidata;
 
 /// <summary>
 /// Süper Lig takımlarını, oyuncularını ve stint'lerini Wikidata'dan çekip veritabanına
-/// idempotent şekilde upsert eder. Tek seferlik çalışıp host'u durdurur (zamanlama sonraki adım).
+/// idempotent şekilde upsert eder. Takım QID'leri Data/superlig-teams.json'dan okunur
+/// (bkz. WikidataQueries.TeamsByQids). Tek seferlik çalışıp host'u durdurur (zamanlama sonraki adım).
 /// </summary>
 public sealed class WikidataSyncService(
     IServiceScopeFactory scopeFactory,
@@ -15,6 +17,12 @@ public sealed class WikidataSyncService(
     ILogger<WikidataSyncService> logger) : BackgroundService
 {
     private static readonly TimeSpan DelayBetweenTeams = TimeSpan.FromSeconds(1);
+
+    /// <summary>Seed dosyası bozuk/boş okunursa (ör. deserialize hatası) tüm takımları silmeyi engelleyen alt sınır.</summary>
+    private const int MinSeedTeamCount = 50;
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    private sealed record TeamSeed(string Qid, string Name);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -41,7 +49,10 @@ public sealed class WikidataSyncService(
         var league = await SeedLeagueAsync(db, sport, ct);
         logger.LogInformation("Sport/League hazır: {Sport} / {League}.", sport.Code, league.Name);
 
-        var teamRows = await wikidataClient.QueryAsync(WikidataQueries.Teams, ct);
+        var teamQids = await LoadSeedTeamQidsAsync(ct);
+        var teamRows = await wikidataClient.QueryAsync(WikidataQueries.TeamsByQids(teamQids), ct);
+        WarnIfTeamsMissing(teamQids, teamRows, logger);
+
         var (teams, newTeamCount) = await UpsertTeamsAsync(db, teamRows, sport, league, ct);
         await db.SaveChangesAsync(ct);
         logger.LogInformation("Takımlar işlendi: {Total} toplam, {New} yeni.", teams.Count, newTeamCount);
@@ -108,6 +119,55 @@ public sealed class WikidataSyncService(
             teams.Count, newTeamCount,
             existingPlayers.Count, newPlayerCount,
             totalStintRows, newStintCount);
+
+        await RemoveStaleDataAsync(db, teamQids, logger, ct);
+    }
+
+    /// <summary>Seed dosyasından çıkarılmış takımları (ve kaskad ile stint'lerini) siler, ardından hiç stint'i kalmayan oyuncuları temizler.</summary>
+    private static async Task RemoveStaleDataAsync(
+        IkiFormaDbContext db, List<string> seedQids, ILogger logger, CancellationToken ct)
+    {
+        if (seedQids.Count < MinSeedTeamCount)
+        {
+            logger.LogWarning(
+                "Seed listesi sadece {Count} QID içeriyor (< {Min}), temizlik adımı güvenlik için atlandı.",
+                seedQids.Count, MinSeedTeamCount);
+            return;
+        }
+
+        var seedQidSet = seedQids.ToHashSet();
+        var removedTeams = await db.Teams
+            .Where(t => !seedQidSet.Contains(t.WikidataId))
+            .ExecuteDeleteAsync(ct);
+        if (removedTeams > 0)
+            logger.LogInformation("Seed dışı {Count} takım (ve kaskad ile stint'leri) silindi.", removedTeams);
+
+        var removedPlayers = await db.Players
+            .Where(p => !db.Stints.Any(s => s.PlayerId == p.Id))
+            .ExecuteDeleteAsync(ct);
+        if (removedPlayers > 0)
+            logger.LogInformation("Hiç stint'i kalmayan {Count} oyuncu silindi.", removedPlayers);
+    }
+
+    private static void WarnIfTeamsMissing(
+        List<string> seedQids, List<Dictionary<string, SparqlValue>> teamRows, ILogger logger)
+    {
+        var returnedQids = teamRows.Select(r => r.GetId("team")).Where(q => q is not null).ToHashSet();
+        var missingQids = seedQids.Where(q => !returnedQids.Contains(q)).ToList();
+        if (missingQids.Count > 0)
+        {
+            logger.LogWarning(
+                "Seed dosyasında olup Wikidata'dan dönmeyen {Count} QID (silinmiş/birleştirilmiş olabilir): {Qids}",
+                missingQids.Count, string.Join(", ", missingQids));
+        }
+    }
+
+    private static async Task<List<string>> LoadSeedTeamQidsAsync(CancellationToken ct)
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "Data", "superlig-teams.json");
+        var json = await File.ReadAllTextAsync(path, ct);
+        var seeds = JsonSerializer.Deserialize<List<TeamSeed>>(json, JsonOptions) ?? [];
+        return seeds.Select(s => s.Qid).ToList();
     }
 
     private static async Task<Sport> SeedSportAsync(IkiFormaDbContext db, CancellationToken ct)
